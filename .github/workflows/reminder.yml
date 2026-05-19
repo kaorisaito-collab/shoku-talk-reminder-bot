@@ -1,0 +1,22 @@
+name: 食トークリマインダー
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # UTC 3時 = JST 12時
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - run: npm install
+      - name: リマインダー送信
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: node remind.js
