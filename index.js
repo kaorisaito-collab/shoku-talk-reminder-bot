@@ -1,5 +1,4 @@
 const { App, LogLevel } = require("@slack/bolt");
-
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
@@ -30,32 +29,43 @@ const SCHEDULE = {
 // 通知先チャンネルID（環境変数で上書き可能）
 const CHANNEL_ID = process.env.SLACK_CHANNEL_ID || "CUK9AE6H2";
 
+// スキップ月（1月・7月）
+const SKIP_MONTHS = [1, 7];
+
+// ==============================
+// 翌月のyearMonthを取得（スキップ月ならnullを返す）
+// ==============================
+function getNextYearMonth() {
+  const now = new Date();
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const nextMonthNum = nextMonth.getMonth() + 1;
+  if (SKIP_MONTHS.includes(nextMonthNum)) {
+    return null;
+  }
+  return `${nextMonth.getFullYear()}-${String(nextMonthNum).padStart(2, "0")}`;
+}
+
 // ==============================
 // メッセージ送信関数
 // ==============================
 async function sendReminder(yearMonth) {
   const entry = SCHEDULE[yearMonth];
-
   if (!entry) {
     console.log(`${yearMonth} の当番データが見つかりません`);
     return;
   }
-
   const [year, month] = yearMonth.split("-");
   const membersText = entry.members.join("・");
   const themeText = entry.theme ? `\n📌 *テーマ:* ${entry.theme}` : "";
-
   const message =
     `🍽️ *食トークのリマインドです！*\n\n` +
     `*${year}年${parseInt(month)}月の担当者:* ${membersText}${themeText}\n\n` +
     `今月もよろしくお願いします！ :raised_hands:`;
-
   await app.client.chat.postMessage({
     channel: CHANNEL_ID,
     text: message,
     mrkdwn: true,
   });
-
   console.log(`✅ ${yearMonth} のリマインドを送信しました`);
 }
 
@@ -68,8 +78,12 @@ const cron = require("node-cron");
 cron.schedule(
   "0 9 10 * *",
   async () => {
-    const now = new Date();
-    const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const yearMonth = getNextYearMonth();
+    if (!yearMonth) {
+      const nextMonthNum = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).getMonth() + 1;
+      console.log(`翌月(${nextMonthNum}月)はスキップ月のためリマインドなし`);
+      return;
+    }
     console.log(`⏰ 定期実行: ${yearMonth} のリマインドを送信します`);
     await sendReminder(yearMonth);
   },
@@ -84,10 +98,11 @@ cron.schedule(
 // ==============================
 app.command("/shoku-reminder", async ({ command, ack, respond }) => {
   await ack();
-
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
+  const yearMonth = getNextYearMonth();
+  if (!yearMonth) {
+    await respond(`⏭️ 翌月はスキップ月のためリマインドなし`);
+    return;
+  }
   await sendReminder(yearMonth);
   await respond(`✅ ${yearMonth} のリマインドをチャンネルに送信しました！`);
 });
