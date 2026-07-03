@@ -104,4 +104,3 @@ app.command("/shoku-reminder", async ({ command, ack, respond }) => {
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log("🚀 食トークリマインダーbot 起動中 (port 3000)");
-})();
