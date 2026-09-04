@@ -33,12 +33,12 @@ const SCHEDULE = {
   "2026-05": { members: ["斎藤", "成尾"], theme: "夏バテ予防クイズ？" },
   "2026-06": { members: ["鶴田", "松尾"], theme: "夏食材" },
   "2026-08": { members: ["谷村", "佐藤"], theme: null },
-  "2026-09": { members: ["中田", "伊藤"], theme: null },
-  "2026-10": { members: ["吉野", "斎藤"], theme: null },
-  "2026-11": { members: ["鶴田", "成尾"], theme: null },
-  "2026-12": { members: ["谷村", "松尾"], theme: null },
-  "2027-02": { members: ["薮内", "佐藤(祐)"], theme: null },
-  "2027-03": { members: ["中田", "伊藤"], theme: null },
+  "2026-09": { members: ["中田", "斎藤"], theme: null },
+  "2026-10": { members: ["鶴田", "成尾"], theme: null },
+  "2026-11": { members: ["谷村", "松尾"], theme: null },
+  "2026-12": { members: ["薮内", "佐藤(祐)"], theme: null },
+  "2027-02": { members: ["中田", "斎藤"], theme: null },
+  "2027-03": { members: ["鶴田", "成尾"], theme: null },
 };
 
 const CHANNEL_ID = process.env.SLACK_CHANNEL_ID || "CUK9AE6H2";
