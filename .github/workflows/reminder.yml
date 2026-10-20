@@ -2,11 +2,16 @@ name: 食トークリマインダー
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # UTC 3時 = JST 12時
-  workflow_dispatch:  # 手動実行も可能
+    - cron: '0 3 * * *'  # 毎日 JST12時：リマインド判定（送信日だけ送る）
+    - cron: '0 0 1 * *'  # 毎月1日 JST9時：停止防止の自動コミット（お休み月も実行）
+  workflow_dispatch:     # 手動実行（リマインド送信のみ）
 
 jobs:
+  # ==============================
+  # リマインド送信
+  # ==============================
   remind:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 3 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 10  # 固まった場合も10分で失敗扱いにして通知する
     steps:
@@ -28,7 +33,41 @@ jobs:
           NOTIFY_USER_ID: U7BPUUZ3N  # 通知先（kaori.saito）
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          TEXT=$(printf '⚠️ *食トークリマインダーでエラーが発生しました*\n実行種別: %s\n詳細ログ: %s' "${{ github.event_name }}" "$RUN_URL")
+          TEXT=$(printf '⚠️ *食トークリマインダーでエラーが発生しました*\n処理: リマインド送信（%s）\n詳細ログ: %s' "${{ github.event_name }}" "$RUN_URL")
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg ch "$NOTIFY_USER_ID" --arg t "$TEXT" '{channel:$ch, text:$t}')"
+
+  # ==============================
+  # 停止防止（60日ルール対策）の自動コミット
+  # ==============================
+  keepalive:
+    if: github.event.schedule == '0 0 1 * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 実行日を記録してコミット
+        run: |
+          TODAY=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
+          echo "最終自動更新: ${TODAY}（ワークフロー停止防止のための自動コミット）" > keepalive.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add keepalive.txt
+          git commit -m "chore: keepalive ${TODAY}" || echo "変更なし"
+          git push
+
+      - name: エラー通知（失敗時のみ）
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          NOTIFY_USER_ID: U7BPUUZ3N  # 通知先（kaori.saito）
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXT=$(printf '⚠️ *食トークリマインダーでエラーが発生しました*\n処理: 停止防止の自動コミット（放置すると60日後にbotが止まります）\n詳細ログ: %s' "$RUN_URL")
           curl -sS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json; charset=utf-8" \
