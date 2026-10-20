@@ -1,37 +1,29 @@
-const { App, LogLevel } = require("@slack/bolt");
-const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  logLevel: LogLevel.INFO,
-});
+// ==============================
+// 食トークリマインダー（GitHub Actions 単発実行版）
+// 毎日 JST12:00 に起動 → 「10日（土日祝なら翌営業日）」の日だけ送信して終了
+// 手動実行（Run workflow）の場合は日付に関係なく今月分を送信
+// ==============================
 
 // ==============================
 // 担当者名 → Slack ユーザーID マッピング
 // ==============================
 const MEMBER_IDS = {
-  "薮内":    "UUT63NEUT",      // megumi.yabuuchi
-  "成尾":    "UAG5R8DAN",      // saki.naruo
-  "佐藤":    "U08Q0B4PB6W",   // yuka.sato
-  "佐藤(祐)": "U08Q0B4PB6W",  // yuka.sato（佐藤祐花）
-  "斎藤":    "U7BPUUZ3N",     // kaori.saito
-  "谷村":    "U500N1AFP",     // sena.tanimura
-  "鶴田":    "U055FG850R2",   // saki.tsuruta
-  "松尾":    "U044FF9PJ8L",   // mariko.matsuo
-  "中田":    "U4BRDU55G",      // kana.nakata
-  "伊藤":    "U09VBSSGC3V",   // sayaka.ito
-  "吉野":    "UQJ0H7SUU",     // chiho.yoshino
+  "薮内":     "UUT63NEUT",    // megumi.yabuuchi
+  "成尾":     "UAG5R8DAN",    // saki.naruo
+  "佐藤":     "U08Q0B4PB6W",  // yuka.sato
+  "佐藤(祐)": "U08Q0B4PB6W",  // yuka.sato
+  "斎藤":     "U7BPUUZ3N",    // kaori.saito
+  "谷村":     "U500N1AFP",    // sena.tanimura
+  "鶴田":     "U055FG850R2",  // saki.tsuruta
+  "松尾":     "U044FF9PJ8L",  // mariko.matsuo
+  "中田":     "U4BRDU55G",    // kana.nakata
+  "吉野":     "UQJ0H7SUU",    // chiho.yoshino
 };
 
 // ==============================
-// 当番表データ
+// 固定スケジュール（キー = リマインドを送る月）
 // ==============================
-const SCHEDULE = {
-  "2025-12": { members: ["薮内", "成尾", "佐藤"], theme: "冬料理" },
-  "2026-02": { members: ["斎藤", "谷村"], theme: "バレンタイン" },
-  "2026-03": { members: ["鶴田", "松尾"], theme: "春食材" },
-  "2026-04": { members: ["薮内", "佐藤"], theme: "新生活" },
-  "2026-05": { members: ["斎藤", "成尾"], theme: "夏バテ予防クイズ？" },
-  "2026-06": { members: ["鶴田", "松尾"], theme: "夏食材" },
+const FIXED_SCHEDULE = {
   "2026-08": { members: ["谷村", "佐藤"], theme: null },
   "2026-09": { members: ["中田", "斎藤"], theme: null },
   "2026-10": { members: ["鶴田", "成尾"], theme: null },
@@ -41,91 +33,146 @@ const SCHEDULE = {
   "2027-03": { members: ["鶴田", "成尾"], theme: null },
 };
 
+// ==============================
+// ローテーション（2027年4月以降・お休み月を除いて順番に回る）
+// ==============================
+const ROTATION = [
+  ["谷村", "松尾"],
+  ["薮内", "佐藤(祐)"],
+  ["中田", "斎藤"],
+  ["鶴田", "成尾"],
+];
+
+const SKIP_MONTHS = [1, 7]; // 1月と7月はお休み
 const CHANNEL_ID = process.env.SLACK_CHANNEL_ID || "CUK9AE6H2";
-const SKIP_MONTHS = [1, 7];
+const IS_MANUAL = process.env.GITHUB_EVENT_NAME === "workflow_dispatch";
 
 // ==============================
-// 名前をメンション or テキストに変換
+// JSTの今日（Actionsのランナーは UTC のため明示的に変換）
 // ==============================
+function getTodayJST() {
+  const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return {
+    year: jst.getUTCFullYear(),
+    month: jst.getUTCMonth() + 1,
+    day: jst.getUTCDate(),
+  };
+}
+
+function formatDate(y, m, d) {
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 function formatMember(name) {
   const id = MEMBER_IDS[name];
   return id ? `<@${id}>` : name;
 }
 
 // ==============================
-// 翌月のyearMonthを取得
+// 祝日・営業日判定
 // ==============================
-function getNextYearMonth() {
-  const now = new Date();
-  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const nextMonthNum = nextMonth.getMonth() + 1;
-  if (SKIP_MONTHS.includes(nextMonthNum)) {
-    return null;
+async function getJapaneseHolidays(year) {
+  try {
+    const res = await fetch(`https://holidays-jp.github.io/api/v1/${year}/date.json`);
+    return Object.keys(await res.json());
+  } catch (e) {
+    console.warn("祝日APIの取得に失敗しました（土日のみで判定します）", e);
+    return [];
   }
-  return `${nextMonth.getFullYear()}-${String(nextMonthNum).padStart(2, "0")}`;
+}
+
+async function getSendDay(year, month) {
+  const holidays = await getJapaneseHolidays(year);
+  const d = new Date(Date.UTC(year, month - 1, 10));
+  while (true) {
+    const dow = d.getUTCDay();
+    const ds = formatDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    if (dow !== 0 && dow !== 6 && !holidays.includes(ds)) {
+      return { month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
 }
 
 // ==============================
-// メッセージ送信関数
+// 担当者の決定
 // ==============================
-async function sendReminder(yearMonth) {
-  const entry = SCHEDULE[yearMonth];
-  if (!entry) {
-    console.log(`${yearMonth} の当番データが見つかりません`);
+function getRotationMembers(year, month) {
+  let count = 0;
+  let y = 2027;
+  let m = 4;
+  while (!(y === year && m === month)) {
+    if (!SKIP_MONTHS.includes(m)) count++;
+    m++;
+    if (m > 12) { m = 1; y++; }
+    if (y > year + 10) break;
+  }
+  return ROTATION[count % ROTATION.length];
+}
+
+function getEntry(year, month) {
+  const key = `${year}-${String(month).padStart(2, "0")}`;
+  if (FIXED_SCHEDULE[key]) return FIXED_SCHEDULE[key];
+  if (year > 2027 || (year === 2027 && month >= 4)) {
+    return { members: getRotationMembers(year, month), theme: null };
+  }
+  return null;
+}
+
+// ==============================
+// メイン
+// ==============================
+async function main() {
+  const { year, month, day } = getTodayJST();
+  const yearMonth = `${year}-${String(month).padStart(2, "0")}`;
+
+  if (SKIP_MONTHS.includes(month)) {
+    console.log(`${month}月はお休み月のためスキップ`);
     return;
   }
-  const [year, month] = yearMonth.split("-");
+
+  if (!IS_MANUAL) {
+    const sendDay = await getSendDay(year, month);
+    if (!(sendDay.month === month && sendDay.day === day)) {
+      console.log(`今日(${month}/${day})は送信日ではありません（今月の送信日: ${sendDay.month}/${sendDay.day}）`);
+      return;
+    }
+  } else {
+    console.log("手動実行のため日付チェックをスキップします");
+  }
+
+  const entry = getEntry(year, month);
+  if (!entry) {
+    console.error(`❌ ${yearMonth} の当番データがありません`);
+    process.exit(1);
+  }
+
   const membersText = entry.members.map(formatMember).join("・");
   const themeText = entry.theme ? `\n📌 *テーマ:* ${entry.theme}` : "";
   const message =
     `🍽️ *食トークのリマインドです！*\n\n` +
-    `*${year}年${parseInt(month)}月の担当者:* ${membersText}${themeText}\n\n` +
+    `*${year}年${month}月の担当者:* ${membersText}${themeText}\n\n` +
     `今月もよろしくお願いします！ :raised_hands:`;
-  await app.client.chat.postMessage({
-    channel: CHANNEL_ID,
-    text: message,
-    mrkdwn: true,
+
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({ channel: CHANNEL_ID, text: message, mrkdwn: true }),
   });
-  console.log(`✅ ${yearMonth} のリマインドを送信しました`);
+
+  const data = await res.json();
+  if (data.ok) {
+    console.log(`✅ ${yearMonth} のリマインドを送信しました`);
+  } else {
+    console.error("❌ 送信失敗:", data.error);
+    process.exit(1);
+  }
 }
 
-// ==============================
-// 毎月10日 午前9時に自動送信
-// ==============================
-const cron = require("node-cron");
-cron.schedule(
-  "0 9 10 * *",
-  async () => {
-    const yearMonth = getNextYearMonth();
-    if (!yearMonth) {
-      const nextMonthNum = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).getMonth() + 1;
-      console.log(`翌月(${nextMonthNum}月)はスキップ月のためリマインドなし`);
-      return;
-    }
-    console.log(`⏰ 定期実行: ${yearMonth} のリマインドを送信します`);
-    await sendReminder(yearMonth);
-  },
-  { timezone: "Asia/Tokyo" }
-);
-
-// ==============================
-// 手動テスト用スラッシュコマンド
-// ==============================
-app.command("/shoku-reminder", async ({ command, ack, respond }) => {
-  await ack();
-  const yearMonth = getNextYearMonth();
-  if (!yearMonth) {
-    await respond(`⏭️ 翌月はスキップ月のためリマインドなし`);
-    return;
-  }
-  await sendReminder(yearMonth);
-  await respond(`✅ ${yearMonth} のリマインドをチャンネルに送信しました！`);
+main().catch((e) => {
+  console.error("❌ 予期しないエラー:", e);
+  process.exit(1);
 });
-
-// ==============================
-// アプリ起動
-// ==============================
-(async () => {
-  await app.start(process.env.PORT || 3000);
-  console.log("🚀 食トークリマインダーbot 起動中 (port 3000)");
-})();
