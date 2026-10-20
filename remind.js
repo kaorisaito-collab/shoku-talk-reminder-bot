@@ -21,7 +21,7 @@ const MEMBER_IDS = {
 };
 
 // ==============================
-// 固定スケジュール（キー = リマインドを送る月）
+// 固定スケジュール（キー = リマインドを送る月。担当するのは翌月の食トーク）
 // ==============================
 const FIXED_SCHEDULE = {
   "2026-08": { members: ["谷村", "佐藤"], theme: null },
@@ -147,12 +147,16 @@ async function main() {
     process.exit(1);
   }
 
+  // 表示するのは食トークの開催月（＝送信月の翌月）
+  const talkYear = month === 12 ? year + 1 : year;
+  const talkMonth = month === 12 ? 1 : month + 1;
+
   const membersText = entry.members.map(formatMember).join("・");
   const themeText = entry.theme ? `\n📌 *テーマ:* ${entry.theme}` : "";
   const message =
     `🍽️ *食トークのリマインドです！*\n\n` +
-    `*${year}年${month}月の担当者:* ${membersText}${themeText}\n\n` +
-    `今月もよろしくお願いします！ :raised_hands:`;
+    `*${talkYear}年${talkMonth}月の担当者:* ${membersText}${themeText}\n\n` +
+    `準備よろしくお願いします！ :raised_hands:`;
 
   const res = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
