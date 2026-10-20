@@ -1,6 +1,7 @@
 // ==============================
 // 食トークリマインダー（GitHub Actions 単発実行版）
 // 毎日 JST12:00 に起動 → 「10日（土日祝なら翌営業日）」の日だけ送信して終了
+// 送るのは「翌月の食トーク」の担当者（食トークは1月・7月お休み → 12月・6月はリマインドなし）
 // 手動実行（Run workflow）の場合は日付に関係なく今月分を送信
 // ==============================
 
@@ -27,14 +28,14 @@ const FIXED_SCHEDULE = {
   "2026-08": { members: ["谷村", "佐藤"], theme: null },
   "2026-09": { members: ["中田", "斎藤"], theme: null },
   "2026-10": { members: ["鶴田", "成尾"], theme: null },
-  "2026-11": { members: ["谷村", "松尾"], theme: null },
-  "2026-12": { members: ["薮内", "佐藤(祐)"], theme: null },
-  "2027-02": { members: ["中田", "斎藤"], theme: null },
-  "2027-03": { members: ["鶴田", "成尾"], theme: null },
+  "2026-11": { members: ["谷村", "松尾"], theme: null },   // → 12月の食トーク
+  "2027-01": { members: ["薮内", "佐藤(祐)"], theme: null }, // → 2月の食トーク
+  "2027-02": { members: ["中田", "斎藤"], theme: null },     // → 3月の食トーク
+  "2027-03": { members: ["鶴田", "成尾"], theme: null },     // → 4月の食トーク
 };
 
 // ==============================
-// ローテーション（2027年4月以降・お休み月を除いて順番に回る）
+// ローテーション（2027年4月送信分（＝5月の食トーク）以降・お休み月を除いて順番に回る）
 // ==============================
 const ROTATION = [
   ["谷村", "松尾"],
@@ -43,7 +44,7 @@ const ROTATION = [
   ["鶴田", "成尾"],
 ];
 
-const SKIP_MONTHS = [1, 7]; // 1月と7月はお休み
+const SKIP_MONTHS = [6, 12]; // リマインドを送らない月（翌月の1月・7月は食トークお休みのため）
 const CHANNEL_ID = process.env.SLACK_CHANNEL_ID || "CUK9AE6H2";
 const IS_MANUAL = process.env.GITHUB_EVENT_NAME === "workflow_dispatch";
 
@@ -127,7 +128,7 @@ async function main() {
   const yearMonth = `${year}-${String(month).padStart(2, "0")}`;
 
   if (SKIP_MONTHS.includes(month)) {
-    console.log(`${month}月はお休み月のためスキップ`);
+    console.log(`${month}月は翌月の食トークがお休みのためリマインドなし`);
     return;
   }
 
