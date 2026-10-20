@@ -8,15 +8,28 @@ on:
 jobs:
   remind:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # 固まった場合も10分で失敗扱いにして通知する
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
       - run: npm install
       - name: リマインダー送信
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
         run: node remind.js
+
+      - name: エラー通知（失敗時のみ）
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          NOTIFY_USER_ID: U7BPUUZ3N  # 通知先（kaori.saito）
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXT=$(printf '⚠️ *食トークリマインダーでエラーが発生しました*\n実行種別: %s\n詳細ログ: %s' "${{ github.event_name }}" "$RUN_URL")
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg ch "$NOTIFY_USER_ID" --arg t "$TEXT" '{channel:$ch, text:$t}')"
